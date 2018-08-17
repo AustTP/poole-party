@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>WebRTC Demo</title>  
+		
+		<style>
+			* { 
+			  margin:0; 
+			  padding:0;
+			}
+			
+			#container {
+			  max-width: 600px;
+			  background-color: #3798F7;
+			}
+			
+			#local {
+			  clear: both;
+			  display: inline-grid;
+			}
+			
+			#local video {
+			  width: 33%;
+			  margin: auto auto;
+			}
+			
+			#mute_btn, #pause_video_btn, #close {
+			  background-color: #2b6cad;
+			  border-radius: 50px;
+			  width: 75px;
+			  height: 75px;
+			  line-height: 75px;
+			  text-align: center;
+			  float: right;
+			  margin: 15px 15px 15px 0;
+			  color: #FFF;
+			}
+		
+			#remote video:first-child:nth-last-child(1) {
+			  width: 100%;
+			}
+
+			#remote video:first-child:nth-last-child(n+2),
+			#remote video:first-child:nth-last-child(n+2) ~ video {
+			  width: 50%;
+			  float: left;
+			}
+			
+			#remote video:first-child:nth-last-child(n+3) ~ video:nth-of-type(2n+1) {
+			  clear: both;
+			}
+			
+			@media screen and (min-width: 600px) {			
+				#remote {
+				  min-height: 450px;
+				  // max-height: 450px;
+				  clear: both;
+				}
+			}
+			
+			@media screen and (max-width: 600px) {			
+				#container {
+				  margin: 5%;
+				}
+			}
+		</style>
+
+		<script defer src="https://use.fontawesome.com/releases/v5.0.6/js/all.js"></script>
+	</head>
+
+	<body>
+		<div id="container">
+			<div id="controls">
+				<!--<div id="close" class="fas fa-times fa-sm" data-fa-transform="shrink-8" onclick="close_window();return false;"></div>-->
+				<div id="pause_video_btn" class="fas fa-video fa-sm" data-fa-transform="shrink-8" onclick="pauseVideoBtnClick()"></div>
+				<div id="mute_btn" class="fas fa-microphone fa-sm" data-fa-transform="shrink-8" onclick="muteBtnClick()"></div>
+			</div>
+		
+			<div id="remote">
+			</div>
+			
+			<div id="local">
+				<video id="localVideo" autoplay playsinline ></video>
+			</div>
+		</div>
+
+        <script src="/socket.io/socket.io.js"></script>
+        <script type="text/javascript">
+			var socketId;
+			var localStream;
+			var connections = [];
+			
+			if (!location.hash) {
+				location.hash = Math.floor(Math.random() * 0xFFFFFF).toString(16);
+			}
+
+			var peerConnection = {
+				'iceServers': [
+					{'urls': 'stun:stun.services.mozilla.com'},
+					{'urls': 'stun:stun.l.google.com:19302'},
+				]
+			};
+
+			var localVideo = document.getElementById('localVideo');
+
+			var constraints = {
+				video: true,
+				audio: true,
+			};
+
+			if(navigator.mediaDevices.getUserMedia) {
+				navigator.mediaDevices.getUserMedia(constraints)
+					.then(getUserMediaSuccess)
+					.then(function(){
+						socket = io.connect('https://104.236.78.98:3000', {secure: true});
+						socket.emit('room', location.hash);
+						socket.on('signal', gotMessageFromServer);    
+
+						socket.on('connect', function(){
+							socketId = socket.id; 
+
+							socket.on('user-left', function(id){
+								var video = document.querySelector('[data-socket="'+ id +'"]');
+								var parentDiv = video.parentElement;
+								video.parentElement.removeChild(video);
+							});
+
+							socket.on('user-joined', function(id, count, clients) {
+								clients.forEach(function(socketListId) {
+									if(!connections[socketListId]){
+										connections[socketListId] = new RTCPeerConnection(peerConnection);
+										
+										connections[socketListId].onicecandidate = function(){
+											if(event.candidate != null) {
+												socket.emit('signal', socketListId, JSON.stringify({'ice': event.candidate}));
+											}
+										}
+
+										connections[socketListId].onaddstream = function(){
+											gotRemoteStream(event, socketListId)
+										}    
+
+										connections[socketListId].addStream(localStream);            
+									}
+								});
+
+								if(count >= 2){
+									connections[id].createOffer().then(function(description){
+										connections[id].setLocalDescription(description).then(function() {
+											socket.emit('signal', id, JSON.stringify({'sdp': connections[id].localDescription}));
+										}).catch(e => console.log(e));        
+									});
+								}
+							});  
+
+							socket.on('full', function (room) {
+								alert('Room "' + room + '" is full. We will create a new room for you.');
+								window.location.hash = Math.floor(Math.random() * 0xFFFFFF).toString(16);
+								window.location.reload();
+							});
+						})
+					}); 
+			} else {
+				alert('Your browser does not support getUserMedia API');
+			} 
+			
+			function getUserMediaSuccess(stream) {
+				localStream = stream;
+				localVideo.src = window.URL.createObjectURL(stream);
+			}
+			
+			function muteBtnClick() {
+				var btn = document.getElementById("mute_btn");
+			
+				if (isMicMuted()) {
+					muteMic(false);
+					// btn.innerHTML = "Mute Mic";
+					btn.style.backgroundColor = "#2b6cad";
+				} else {
+					muteMic(true);
+					// btn.innerHTML = "Unmute Mic";
+					btn.style.backgroundColor = "red";
+				}
+			}
+			
+			function isMicMuted() {
+				return !(localStream.getAudioTracks()[0].enabled);
+			}
+			
+			function muteMic(mute) {
+				localStream.getAudioTracks()[0].enabled = !mute;
+			};
+			
+			function pauseVideoBtnClick() {
+				var btn = document.getElementById("pause_video_btn");
+			
+				if (isVideoPaused()) {
+					pauseVideo(false);
+					// btn.innerHTML = "Pause Video";
+					btn.style.backgroundColor = "#2b6cad";
+				} else {
+					pauseVideo(true);
+					// btn.innerHTML = "Stream Video";
+					btn.style.backgroundColor = "red";
+				}
+			}
+			
+			function isVideoPaused() {
+				return !(localStream.getVideoTracks()[0].enabled);
+			}
+			
+			function pauseVideo(pause) {
+				localStream.getVideoTracks()[0].enabled = !pause;
+			};
+			
+			function gotRemoteStream(event, id) {
+				var video  = document.createElement('video');
+
+				video.setAttribute('data-socket', id);
+				video.src = window.URL.createObjectURL(event.stream);
+				video.autoplay = true; 
+				video.playsinline = true;
+				
+				document.getElementById("remote").appendChild(video);      
+			}
+
+			function gotMessageFromServer(fromId, message) {
+				var signal = JSON.parse(message)
+
+				if(fromId != socketId) {
+					if(signal.sdp){            
+						connections[fromId].setRemoteDescription(new RTCSessionDescription(signal.sdp)).then(function() {                
+							if(signal.sdp.type == 'offer') {
+								connections[fromId].createAnswer().then(function(description){
+									connections[fromId].setLocalDescription(description).then(function() {
+										socket.emit('signal', fromId, JSON.stringify({'sdp': connections[fromId].localDescription}));
+									}).catch(e => console.log(e));        
+								}).catch(e => console.log(e));
+							}
+						}).catch(e => console.log(e));
+					}
+				
+					if(signal.ice) {
+						connections[fromId].addIceCandidate(new RTCIceCandidate(signal.ice)).catch(e => console.log(e));
+					}                
+				}
+			}
+        </script>
+	</body>
+</html>
