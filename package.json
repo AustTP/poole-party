@@ -1,6 +1,6 @@
 {
   "name": "Poole Party",
-  "description": "A bare bones WebRTC group video chat solution built with Node.js, Socket.io, HTML, CSS, and JavaScript.",
+  "description": "A bare bones WebRTC group video chat solution built with Node.js, Socket.io, HTML, and CSS.",
   "version": "0.1.0",
   "dependencies": {
     "express": "^4.10.7",
